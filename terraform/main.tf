@@ -34,9 +34,21 @@ data "aws_iam_policy_document" "ws_messenger_lambda_policy" {
     actions = [
       "dynamodb:PutItem",
       "dynamodb:DeleteItem",
+      "dynamodb:Scan",
     ]
     effect    = "Allow"
     resources = [aws_dynamodb_table.ws_messenger_table.arn]
+  }
+
+  statement {
+    actions = [
+      "execute-api:ManageConnections",
+    ]
+    effect = "Allow"
+    resources = [
+      aws_apigatewayv2_api.ws_messenger_api_gateway.arn,
+      "${aws_apigatewayv2_api.ws_messenger_api_gateway.arn}/*/*"
+    ]
   }
 }
 
@@ -118,7 +130,7 @@ resource "aws_lambda_function" "ws_messenger_lambda" {
 }
 
 resource "aws_cloudwatch_log_group" "ws_messenger_logs" {
-  name = "/aws/lambda/${aws_lambda_function.ws_messenger_lambda.function_name}"
+  name              = "/aws/lambda/${aws_lambda_function.ws_messenger_lambda.function_name}"
   retention_in_days = 30
 }
 
@@ -129,10 +141,18 @@ resource "aws_apigatewayv2_api" "ws_messenger_api_gateway" {
 }
 
 resource "aws_apigatewayv2_integration" "ws_messenger_api_integration" {
-  api_id           = aws_apigatewayv2_api.ws_messenger_api_gateway.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.ws_messenger_lambda.invoke_arn
-  credentials_arn  = aws_iam_role.ws_messenger_api_gateway_role.arn
+  api_id                    = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  integration_type          = "AWS_PROXY"
+  integration_uri           = aws_lambda_function.ws_messenger_lambda.invoke_arn
+  credentials_arn           = aws_iam_role.ws_messenger_api_gateway_role.arn
+  content_handling_strategy = "CONVERT_TO_TEXT"
+  passthrough_behavior      = "WHEN_NO_MATCH"
+}
+
+resource "aws_apigatewayv2_integration_response" "ws_messenger_api_integration_response" {
+  api_id                   = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  integration_id           = aws_apigatewayv2_integration.ws_messenger_api_integration.id
+  integration_response_key = "/200/"
 }
 
 resource "aws_apigatewayv2_route" "ws_messenger_api_default_route" {
@@ -141,16 +161,58 @@ resource "aws_apigatewayv2_route" "ws_messenger_api_default_route" {
   target    = "integrations/${aws_apigatewayv2_integration.ws_messenger_api_integration.id}"
 }
 
+resource "aws_apigatewayv2_route_response" "ws_messenger_api_default_route_response" {
+  api_id             = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_id           = aws_apigatewayv2_route.ws_messenger_api_default_route.id
+  route_response_key = "$default"
+}
+
 resource "aws_apigatewayv2_route" "ws_messenger_api_connect_route" {
   api_id    = aws_apigatewayv2_api.ws_messenger_api_gateway.id
   route_key = "$connect"
   target    = "integrations/${aws_apigatewayv2_integration.ws_messenger_api_integration.id}"
 }
 
+resource "aws_apigatewayv2_route_response" "ws_messenger_api_connect_route_response" {
+  api_id             = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_id           = aws_apigatewayv2_route.ws_messenger_api_connect_route.id
+  route_response_key = "$default"
+}
+
 resource "aws_apigatewayv2_route" "ws_messenger_api_disconnect_route" {
   api_id    = aws_apigatewayv2_api.ws_messenger_api_gateway.id
   route_key = "$disconnect"
   target    = "integrations/${aws_apigatewayv2_integration.ws_messenger_api_integration.id}"
+}
+
+resource "aws_apigatewayv2_route_response" "ws_messenger_api_disconnect_route_response" {
+  api_id             = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_id           = aws_apigatewayv2_route.ws_messenger_api_disconnect_route.id
+  route_response_key = "$default"
+}
+
+resource "aws_apigatewayv2_route" "ws_messenger_api_ping_route" {
+  api_id    = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_key = "PING"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_messenger_api_integration.id}"
+}
+
+resource "aws_apigatewayv2_route_response" "ws_messenger_api_ping_route_response" {
+  api_id             = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_id           = aws_apigatewayv2_route.ws_messenger_api_ping_route.id
+  route_response_key = "$default"
+}
+
+resource "aws_apigatewayv2_route" "ws_messenger_api_message_route" {
+  api_id    = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_key = "MESSAGE"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_messenger_api_integration.id}"
+}
+
+resource "aws_apigatewayv2_route_response" "ws_messenger_api_message_route_response" {
+  api_id             = aws_apigatewayv2_api.ws_messenger_api_gateway.id
+  route_id           = aws_apigatewayv2_route.ws_messenger_api_message_route.id
+  route_response_key = "$default"
 }
 
 resource "aws_apigatewayv2_stage" "ws_messenger_api_stage" {

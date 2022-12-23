@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"ws-messenger/internal/handler"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -9,11 +11,22 @@ import (
 )
 
 func Handler(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayProxyResponse, error) {
-	switch event.RequestContext.EventType {
-	case "CONNECT":
+	content, err := json.Marshal(event)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
+	}
+
+	log.Printf("new event. content: %s", string(content))
+
+	switch event.RequestContext.RouteKey {
+	case "$connect":
 		return handler.Connect(ctx, event)
-	case "DISCONNECT":
+	case "$disconnect":
 		return handler.Disconnect(ctx, event)
+	case "PING":
+		return handler.Ping(ctx, event)
+	case "MESSAGE":
+		return handler.Message(ctx, event)
 	default:
 		return events.APIGatewayProxyResponse{Body: "no handler", StatusCode: 200}, nil
 	}

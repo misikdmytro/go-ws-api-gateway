@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -14,8 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 )
 
-func Connect(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayProxyResponse, error) {
-	log.Printf("new connection. id: %s", event.RequestContext.ConnectionID)
+func Ping(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayProxyResponse, error) {
+	log.Print("ping message")
+
+	const pongAction = "PONG"
 
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
@@ -37,8 +40,25 @@ func Connect(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) 
 		Item:      item,
 	}
 
-	svc.PutItemWithContext(ctx, input)
+	_, err = svc.PutItemWithContext(ctx, input)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
+	}
+
+	response := model.Response[model.PongResponsePayload]{
+		Action:   pongAction,
+		Response: model.PongResponsePayload{},
+	}
+
+	content, err := json.Marshal(response)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
+	}
+
+	log.Printf("pong response: %s", string(content))
+
 	return events.APIGatewayProxyResponse{
+		Body:       string(content),
 		StatusCode: http.StatusOK,
 	}, nil
 }

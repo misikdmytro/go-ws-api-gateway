@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"ws-messenger/internal/helper"
 	"ws-messenger/internal/model"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/apigatewaymanagementapi"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 func Message(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -21,37 +22,47 @@ func Message(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) 
 
 	const messageAction = "MESSAGE"
 
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
+	svc, err := helper.NewDynamoDB(ctx)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
+	}
 
-	svc := dynamodb.New(sess)
 	var request model.Request[model.MessageRequestPayload]
 	if err := json.Unmarshal([]byte(event.Body), &request); err != nil {
 		return events.APIGatewayProxyResponse{}, err
 	}
 
 	filt := expression.Name("ConnectionID").NotEqual(expression.Value(event.RequestContext.ConnectionID))
-	expr, err := expression.NewBuilder().WithFilter(filt).Build()
+	proj := expression.NamesList(expression.Name("ConnectionID"))
+	expr, err := expression.NewBuilder().WithFilter(filt).WithProjection(proj).Build()
 	if err != nil {
 		return events.APIGatewayProxyResponse{}, err
 	}
 
 	input := &dynamodb.ScanInput{
-		TableName:                 aws.String("ws-messenger-table"),
+		TableName:                 aws.String(os.Getenv("DYNAMODB_TABLE")),
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		FilterExpression:          expr.Filter(),
+		ProjectionExpression:      expr.Projection(),
+		Limit:                     aws.Int32(100),
 	}
-	output, err := svc.ScanWithContext(ctx, input)
+
+	output, err := svc.Scan(ctx, input)
 	if err != nil {
 		return events.APIGatewayProxyResponse{}, err
 	}
 
-	api := apigatewaymanagementapi.New(sess)
+	log.Printf("found %d active connections", output.Count)
+
+	api, err := helper.NewAPIGatewayManagementAPI(ctx)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
+	}
+
 	for _, item := range output.Items {
 		var conn model.Connection
-		if err := dynamodbattribute.UnmarshalMap(item, &conn); err != nil {
+		if err := attributevalue.UnmarshalMap(item, &conn); err != nil {
 			return events.APIGatewayProxyResponse{}, err
 		}
 
@@ -71,10 +82,12 @@ func Message(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) 
 			Data:         data,
 		}
 
-		api.PostToConnectionWithContext(ctx, input)
+		if _, err = api.PostToConnection(ctx, input); err != nil {
+			return events.APIGatewayProxyResponse{}, err
+		}
 	}
 
 	return events.APIGatewayProxyResponse{
-		StatusCode: http.StatusInternalServerError,
+		StatusCode: http.StatusOK,
 	}, nil
 }

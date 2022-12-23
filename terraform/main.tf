@@ -42,12 +42,11 @@ data "aws_iam_policy_document" "ws_messenger_lambda_policy" {
 
   statement {
     actions = [
-      "execute-api:ManageConnections",
+      "execute-api:*",
     ]
     effect = "Allow"
     resources = [
-      aws_apigatewayv2_api.ws_messenger_api_gateway.arn,
-      "${aws_apigatewayv2_api.ws_messenger_api_gateway.arn}/*/*"
+      "${aws_apigatewayv2_stage.ws_messenger_api_stage.execution_arn}/*/*/*"
     ]
   }
 }
@@ -127,6 +126,13 @@ resource "aws_lambda_function" "ws_messenger_lambda" {
   handler          = "main"
   runtime          = "go1.x"
   source_code_hash = data.archive_file.ws_messenger_zip.output_base64sha256
+
+  environment {
+    variables = {
+      "API_GATEWAY_ENDPOINT" = "https://${aws_apigatewayv2_api.ws_messenger_api_gateway.id}.execute-api.${local.region}.amazonaws.com/${aws_apigatewayv2_stage.ws_messenger_api_stage.id}"
+      "DYNAMODB_TABLE"       = aws_dynamodb_table.ws_messenger_table.id
+    }
+  }
 }
 
 resource "aws_cloudwatch_log_group" "ws_messenger_logs" {

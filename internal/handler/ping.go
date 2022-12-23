@@ -6,13 +6,13 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"ws-messenger/internal/helper"
 	"ws-messenger/internal/model"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 func Ping(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -20,17 +20,15 @@ func Ping(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (ev
 
 	const pongAction = "PONG"
 
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-
-	svc := dynamodb.New(sess)
-	conn := model.Connection{
-		ConnectionID:   event.RequestContext.ConnectionID,
-		ExpirationTime: int(time.Now().Add(5 * time.Minute).Unix()),
+	svc, err := helper.NewDynamoDB(ctx)
+	if err != nil {
+		return events.APIGatewayProxyResponse{}, err
 	}
 
-	item, err := dynamodbattribute.MarshalMap(conn)
+	item, err := attributevalue.MarshalMap(model.Connection{
+		ConnectionID:   event.RequestContext.ConnectionID,
+		ExpirationTime: int(time.Now().Add(5 * time.Minute).Unix()),
+	})
 	if err != nil {
 		return events.APIGatewayProxyResponse{}, err
 	}
@@ -40,8 +38,7 @@ func Ping(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (ev
 		Item:      item,
 	}
 
-	_, err = svc.PutItemWithContext(ctx, input)
-	if err != nil {
+	if _, err = svc.PutItem(ctx, input); err != nil {
 		return events.APIGatewayProxyResponse{}, err
 	}
 
